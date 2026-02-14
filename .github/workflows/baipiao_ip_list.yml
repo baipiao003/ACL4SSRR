@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '30 21 * * *'  # 每天的8点、16点执行（UTC时间）
 
+env:
+  IP_URL: "https://zip.cm.edu.kg/all.txt"
+  IP_FILENAME: "baipiao.txt"
+  
 permissions:
   contents: write
 
@@ -14,25 +18,10 @@ jobs:
       - name: 检出代码仓库
         uses: actions/checkout@v4
 
-      - name: Check PROXYIP_URL variable
-        run: |
-          # 检查是否设置了PROXYIP_URL变量
-          PROXYIP_URL="${{ vars.PROXYIP_URL }}"
-          if [ -z "$PROXYIP_URL" ]; then
-            echo "❌ 错误: 未设置 PROXYIP_URL 变量"
-            echo "请在仓库设置中添加 PROXYIP_URL 变量："
-            echo "1. 进入仓库 Settings > Secrets and variables > Actions"
-            echo "2. 在 Variables 标签页中添加新变量"
-            echo "3. Name: PROXYIP_URL"
-            echo "4. Value: 配置文件的URL地址"
-            exit 1
-          fi
-          echo "✅ PROXYIP_URL 变量已设置: $PROXYIP_URL"
-
       - name: Check URL status
         id: check_url
         run: |
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PROXYIP_URL")
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.IP_URL }}")
           echo "Status code: $STATUS_CODE"
           if [ "$STATUS_CODE" = "200" ]; then
             echo "url_status_ok=true" >> $GITHUB_OUTPUT
@@ -45,7 +34,7 @@ jobs:
       - name: Download
         if: steps.check_url.outputs.url_status_ok == 'true'
         run: |
-          curl -L "$PROXYIP_URL" -o baipiao.txt
+          curl -L "${{ env.IP_URL }}" -o "${{ env.IP_FILENAME }}"
 
       - name: 提交更新的IP库文件
         if: steps.check_url.outputs.url_status_ok == 'true'
@@ -53,17 +42,19 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
+          FILENAME="${{ env.IP_FILENAME }}"
+
           # 检查文件是否有变化
-          if [ ! -f baipiao.txt ] || [ ! -s baipiao.txt ]; then
-            echo "baipiao.txt 文件不存在或为空，跳过提交"
+          if [ ! -f "$FILENAME" ] || [ ! -s "$FILENAME" ]; then
+            echo "$FILENAME 文件不存在或为空，跳过提交"
             exit 0
           fi
           
-          if git diff --quiet baipiao.txt 2>/dev/null; then
-            echo "baipiao.txt 文件没有变化，跳过提交"
+          if git diff --quiet "$FILENAME" 2>/dev/null; then
+            echo "$FILENAME 文件没有变化，跳过提交"
           else
-            echo "检测到 baipiao.txt 文件有变化，开始提交"
-            git add baipiao.txt
+            echo "检测到 $FILENAME 文件有变化，开始提交"
+            git add "$FILENAME"
             git commit -m "更新IP库文件 $(date '+%Y-%m-%d %H:%M:%S')"
             git push
             echo "提交完成"
