@@ -1,8 +1,12 @@
 name: 更新反代IP库
 on:
   workflow_dispatch:
-  #schedule:
-  #  - cron: '30 21 * * 3'  # 每周三 21:30 UTC 执行（北京时间周四 05:30）
+  schedule:    
+    - cron: '30 21 * * 3'  # 每周三 21:30 UTC 执行（北京时间周四 05:30）
+
+env:
+  IP_URL: "https://zip.cm.edu.kg/all.txt"
+  IP_FILENAME: "baipiao.txt"
 
 permissions:
   contents: write
@@ -10,29 +14,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      PROXYIP_URL: ${{ secrets.PROXYIP_URL || vars.PROXYIP_URL }}
     steps:
       - name: 检出代码仓库
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Check PROXYIP_URL variable
-        run: |
-          # 检查是否设置了PROXYIP_URL变量
-          if [ -z "$PROXYIP_URL" ]; then
-            echo "❌ 错误: 未设置 PROXYIP_URL 变量"
-            echo "请在仓库设置中添加 PROXYIP_URL 变量："
-            echo "1. 进入仓库 Settings > Secrets and variables > Actions"
-            echo "2. 在 Secrets 或 Variables 中添加 PROXYIP_URL"
-            exit 1
-          fi
-          echo "::add-mask::$PROXYIP_URL"
-          echo "✅ PROXYIP_URL 变量已设置"
-
-      - name: Check URL status
+      - name: 检查 URL 状态
         id: check_url
         run: |
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PROXYIP_URL")
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.IP_URL }}")
           echo "Status code: $STATUS_CODE"
           if [ "$STATUS_CODE" = "200" ]; then
             echo "url_status_ok=true" >> $GITHUB_OUTPUT
@@ -42,29 +31,36 @@ jobs:
             echo "URL 响应异常，状态码为 $STATUS_CODE，将跳过后续步骤"
           fi
 
-      - name: Download
+      - name: 下载 IP 库文件
         if: steps.check_url.outputs.url_status_ok == 'true'
         run: |
-          curl -L "$PROXYIP_URL" -o baipiao.txt
+          curl -L "${{ env.IP_URL }}" -o "${{ env.IP_FILENAME }}"
 
       - name: 提交更新的IP库文件
         if: steps.check_url.outputs.url_status_ok == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+          FILENAME="${{ env.IP_FILENAME }}"
 
-          # 检查文件是否有变化
-          if [ ! -f baipiao.txt ] || [ ! -s baipiao.txt ]; then
-            echo "baipiao.txt 文件不存在或为空，跳过提交"
+          # 检查文件是否成功下载且不为空
+          if [ ! -f "$FILENAME" ] || [ ! -s "$FILENAME" ]; then
+            echo "$FILENAME 文件不存在或为空，跳过提交"
             exit 0
           fi
+          
+          # 修复：先添加进暂存区，解决新文件无法被 git diff 检测到的问题
+          git add "$FILENAME"
 
-          if git diff --quiet baipiao.txt 2>/dev/null; then
-            echo "baipiao.txt 文件没有变化，跳过提交"
+          # 检查暂存区是否有内容变化
+          if git diff --staged --quiet; then
+            echo "$FILENAME 文件内容没有变化，无需提交"
           else
-            echo "检测到 baipiao.txt 文件有变化，开始提交"
-            git add baipiao.txt
-            git commit -m "更新IP库文件 $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "检测到 $FILENAME 文件有更新，开始提交"
+            # 优化：使用北京时间作为 commit 记录
+            COMMIT_TIME=$(TZ="Asia/Shanghai" date '+%Y-%m-%d %H:%M:%S')
+            git commit -m "更新IP库文件 $COMMIT_TIME"
             git push
             echo "提交完成"
           fi
